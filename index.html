@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>JS Hex Area Mapper</title>
+	<script src="./lib/vue.min.js"></script>
+	<style>
+		body {
+			display: block;
+			font-family: monospace;
+			margin: 0;
+			padding: 0;
+		}
+		.main {
+			display: flex;
+			margin-top: 20px;
+			flex-direction: row;
+		}
+		.hexview, .structureview {
+			margin: 0 20px;	
+			position: relative
+		}
+		.structureview {
+			display: flex;
+			flex-direction: column;
+		}
+		.newItem input, .newItem select {
+			width: 180px;
+			display: flex;
+			margin: 10px;
+			justify-content: center;
+		}
+		.save {
+			position: fixed;
+			right: 10px;
+			bottom: 10px;
+		}
+		.fmview {
+			position: fixed;
+			border-bottom: 1px solid #eee;
+			color: #777;
+			left: 20px;
+			top: 0;
+			background: white;
+		}
+		.fmview div {
+			display: inline-block;
+			margin: 0 10px 2px 0;
+		}
+		.fmview span {
+			cursor: pointer
+		}
+		#fileSelector {
+			position: absolute;
+			left: -100px;
+			top: -100px;
+			height: 0;
+			width: 0;
+		}
+		.selected {
+			color: #000;
+			font-weight: 800;
+		}
+		span.close {
+			color: #aaa;
+			font-size: 10px;
+			vertical-align: top;
+			padding: 4px;
+		}
+		.intro {
+			display: flex;
+			width: 100%;
+			height: 100%;
+			justify-content: center;
+			align-items: center;
+			flex-direction: column;
+		}
+		.open {
+			border-radius: 10px;
+			border: 2px solid black;
+			font-size: 16px;
+			padding: 4px;
+		}
+		.arrow {
+			position: absolute;
+			left: -14px;
+			font-size: 16px;
+			cursor: pointer;
+		}
+		.arrow.arrow-up {
+			transform: rotate(90deg);
+			top: 0;
+		}
+		span.arrow.arrow-down {
+			bottom: 0;
+			transform: rotate(-90deg);
+		}
+	</style>
+</head>
+<body>
+<div id="app">
+	<input type="file" id="fileSelector" @change="fileSelected"/>
+	<div v-if="file == false" class="intro">
+		<h1>Hex Viewer + Area Mapper</h1>
+		<label for="fileSelector" class="open">Open File</label>
+		</div>
+	<div v-else class="main">
+		<div class="fmview">
+			<div v-for="f in files" :class="{selected: selectedFile == f.name}">
+				<span @click="selectFileFromTabs(f.name)">{{f.name}}</span><span class="close" @click="closeFile(f.name)">x</span>
+			</div>
+			<label for="fileSelector"><div><span>+</span></div></label>
+		</div>
+		<div class="hexview">
+			<span class="arrow arrow-up">&lt;</span>
+			<span class="arrow arrow-down">&lt;</span>
+			<span v-for="(b, index) in u8short" :key="index" class="bytes" :style="getAreaColors(index)"><br v-if="index%16 == 0 && index != 0">{{normalize(b)}}
+			<span class="row" v-if="index%4 == 0"></span></span>
+		</div>
+		<div class="textview">
+			<span v-for="(b, index) in u8short" :key="index" class="text"><br v-if="index%16 == 0 && index != 0">{{String.fromCharCode(b)}}
+			<span class="row" v-if="index%4 == 0"></span></span>
+		</div>
+		<div class="structureview">
+			<div class="newItem">
+				<input type="hidden" v-model="newItem.id">
+				name:
+				<input type="text" placeholder="area name" v-model="newItem.name"/>
+				background color:
+				<input type="color" v-model="newItem.bgcolor"/>
+				foreground color:
+				<input type="color" v-model="newItem.fgcolor"/>
+				start:
+				<select v-model="newItem.starttype">
+					<option value="0">after previous block</option>
+					<option value="1">at fixed value</option>
+					<option value="2">defined at</option>
+				</select>
+				<input v-model="newItem.start" type="text" v-if="newItem.starttype == 1 || newItem.starttype == 2" />
+				<select v-model="newItem.startint" v-if="newItem.starttype == 2">
+					<option v-for="(i, index) in inttypes" :value="index">{{i}}</option>
+				</select>
+				type:
+				<select v-model="newItem.type">
+					<option>static</option>
+					<option>variable</option>
+					<option>dynamic</option>
+				</select>
+				size:
+				<select v-model="newItem.sizetype">
+					<option value="0">fixed</option>
+					<option value="1">defined at</option>
+				</select>
+				<input type="text" v-model="newItem.size">
+				<select v-model="newItem.sizeint" v-if="newItem.sizetype == 1">
+					<option v-for="(i, index) in inttypes" :value="index">{{i}}</option>
+				</select>
+				<input type="button" value="ok" @click="addArea">
+			</div>
+			<div class="items" v-if="areas.length > 0">
+				<table>
+				<tr>
+				  <th>#</th>
+				  <th>Area</th>
+				  <th>Start</th>
+				  <th>Size</th>
+				  <th>Action</th>
+				</tr>
+				<tr v-for="(area, index) in areas" :key="index">
+					<td>{{index}}</td>
+					<td :style="{backgroundColor: area.bgcolor, color: area.fgcolor}">{{area.name}}</td>
+					<td>0x{{normalize(area._start, 6)}}</td>
+					<td>{{area._size}}</td>
+					<td @click=deleteArea(area.id)><button>delete</button></td>
+				</tr>
+				</table>
+			</div>
+			<button class="save" @click="downloadAreas()">Save schema</button>
+		</div>
+	</div>
+</div>
+	<script>
+	var app = new Vue({
+    'el': '#app',
+    'data': {
+    	file: false, 
+    	u8: false,
+    	files: [], 
+    	areas: [],
+    	inttypes: ["i08", "i16", "i24", "i32", "i64", "u08", "u16", "u24", "u32", "u64"], 
+    	newItem: {
+    		id: 0, 
+    		name: '', 
+    		bgcolor: '#ffffff', 
+    		fgcolor: '#000000', 
+    		type: 'static',
+    		sizetype: 0, 
+    		sizeint: 0, 
+    		size: 0, 
+    		starttype: 0, 
+    		start: 0, 
+    		startint: 0
+    	}, 
+    	selectedFile: false, 
+    	defaultColors: {backgroundColor: '#ffffff', color: '#000000'}, 
+    	defaultItem: false
+    }, 
+     mounted() {
+     	this.defaultItem = Object.assign({}, this.newItem)
+     }, 
+    'computed': {
+    	u8short() {
+    		return this.u8.slice(0, 800)
+    	}, 
+    	areaMap() {
+    		let m = []
+    		for (let area of this.areas) {
+    			m.push([area._start, area._start + area._size, area.bgcolor, area.fgcolor])
+    		}
+    		return m
+    	}
+    }, 
+    'methods': {
+    	addArea() {
+    		this.areas.push(new AreaItem(this.newItem))
+    		this.defaultItem.id++
+    		this.newItem = Object.assign({}, this.defaultItem)
+    	}, 
+    	deleteArea(id) {
+    		this.areas.splice(this.areas.findIndex(f => f.id == id), 1)
+    	}, 
+    	normalize(b, z=2) {
+    		let o = b.toString(16).toUpperCase()
+    		while (o.length < z) {
+    			o = '0' + o
+    		}
+    		return o
+    	}, 
+    	fileSelected() {
+    		if (fileSelector.files.length < 1) return
+    		var reader = new FileReader()
+    		reader.readAsArrayBuffer(fileSelector.files[0])
+    		setTimeout(this.loadFile, 420, reader)
+    	}, 
+    	loadFile(reader) {
+    		let f = fileSelector.files[0]
+    		this.file = reader.result
+    		this.u8 = new Uint8Array(this.file)
+    		this.files.push({name: f.name, size: f.size, u8: this.u8, file: this.file})
+    		this.selectedFile = f.name
+    	}, 
+    	selectFileFromTabs(name) {
+    		let target = this.files.find(x => x.name == name)
+    		this.file = target.file
+    		this.u8 = target.u8
+    		this.selectedFile = target.name
+    	}, 
+    	closeFile(name) {
+    		console.log('closing ', name)
+    		if (this.files.length > 1) {
+    			let index = this.files.findIndex(x => x.name == name)
+    			this.files.splice(index, 1)
+    			this.selectFileFromTabs(this.files[index > 0 ? index - 1 : 0].name)
+    		} else {
+    			this.files = []
+    			this.file = false
+    		}
+    	}, 
+    	getAreaColors(index) {
+    		for (let i=0, l=this.areaMap.length; i<l; i++) {
+    			let el = this.areaMap[i]
+    			if (index >= el[0] && index < el[1]) {
+    				return {backgroundColor: el[2], color: el[3]}
+    			}
+    		}
+    		return this.defaultColors
+    	},
+    	readValue(offset, inttype=false) {
+    		//TODO: implement inttype specific reading
+    		return this.u8[offset]
+    	}, 
+    	downloadAreas() {
+    		Downloader.downloadBlob(JSON.stringify(this.areas), 'areas.json')
+    	}
+    }
+    })
+    
+    class AreaItem {
+    	constructor(cfgobj) {
+    		for (let item in cfgobj) {
+    			this[item] = cfgobj[item]
+    		}
+    		if (app.areas.length == 0) {
+    			this._start = this.starttype == 0 ? 0 : parseInt(this.start, 16)
+    			this._size = this.sizetype == 0 ? parseInt(this.size) : parseInt(this.size) /*TODO: implement reading start size*/
+    		} else {
+    			if (this.starttype == 0) { //after prev
+					let prevItem = app.areas.find(a => a.id == app.defaultItem.id-1)
+					this._start = prevItem._start + prevItem._size
+				} else if (this.starttype == 1) { //fixed pos
+					this._start = parseInt(this.start, 16)
+				} else { //from addr
+					this._start = app.readValue(this.start)
+				}
+				
+				if (this.sizetype == 0) { //fixed size
+					this._size = parseInt(this.size)
+				} else {
+					this._size = app.readValue(this.size)
+				}
+    		}
+    	}
+    }
+    const Downloader = {
+		downloadBlob: function(data, fileName, mimeType) {
+			let blob, url
+			blob = new Blob([data], {type: mimeType})
+			url = window.URL.createObjectURL(blob)
+			Downloader.downloadURL(url, fileName)
+			setTimeout(function() {
+				return window.URL.revokeObjectURL(url)
+			}, 1000)
+		},
+
+		downloadURL: function(data, fileName) {
+			let a = document.createElement('a')
+			a.href = data
+			a.download = fileName
+			a.style = 'display: none'
+			document.body.appendChild(a)
+			a.click()
+			a.remove()
+		}
+	}
+	</script>
+</body>
+</html>

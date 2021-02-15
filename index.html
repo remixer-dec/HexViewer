@@ -21,6 +21,13 @@
 			margin: 0 20px;	
 			position: relative
 		}
+		.areaview {
+			min-width: 300px;
+			position: relative;
+			max-height: 720px;
+			padding-bottom: 60px;
+			box-sizing: border-box;
+		}
 		.hexview {
 			min-width: 336px;
 			min-height: 780px;
@@ -44,16 +51,6 @@
 			display: flex;
 			margin: 10px;
 			justify-content: center;
-		}
-		.load {
-			position: absolute;
-			right: 10px;
-			bottom: 40px;
-		}
-		.save {
-			position: absolute;
-			right: 10px;
-			bottom: 10px;
 		}
 		.fmview {
 			position: fixed;
@@ -229,12 +226,12 @@
 				start:
 				<select v-model="newItem.starttype">
 					<option value="0">after previous block</option>
-					<option value="1">at fixed value</option>
+					<option value="1">at fixed address</option>
 					<option value="2">defined at</option>
 				</select>
 				<input v-model="newItem.start" type="text" v-if="newItem.starttype == 1 || newItem.starttype == 2" />
 				<select v-model="newItem.startint" v-if="newItem.starttype == 2">
-					<option v-for="(i, index) in inttypes" :value="index">{{i}}</option>
+					<option v-for="(i, index) in inttypes" :value="i">{{i}}</option>
 				</select>
 				type:
 				<select v-model="newItem.type">
@@ -249,10 +246,14 @@
 				</select>
 				<input type="text" v-model="newItem.size">
 				<select v-model="newItem.sizeint" v-if="newItem.sizetype == 1">
-					<option v-for="(i, index) in inttypes" :value="index">{{i}}</option>
+					<option v-for="(i, index) in inttypes" :value="i">{{i}}</option>
 				</select>
 				<input type="button" value="ok" @click="addArea">
 			</div>
+		</div>
+		<div class="areaview">
+			<button class="load" @click="uploadAreas()">Load schema</button>
+			<button class="save" @click="downloadAreas()">Save schema</button>
 			<div class="items" v-if="areas.length > 0">
 				<table>
 				<tr>
@@ -267,12 +268,10 @@
 					<td :style="{backgroundColor: area.bgcolor, color: area.fgcolor}">{{area.name}}</td>
 					<td>0x{{normalize(area._start, 8)}}</td>
 					<td>{{area._size}}</td>
-					<td @click=deleteArea(area.id)><button>delete</button></td>
+					<td><button @click=deleteArea(area.id)>delete</button></td>
 				</tr>
 				</table>
 			</div>
-			<button class="load" @click="uploadAreas()">Load schema</button>
-			<button class="save" @click="downloadAreas()">Save schema</button>
 		</div>
 		<div class="bottomview">
 			<span @dblclick="goToAddress()" id="hex-offset">0x{{normalize(offset, 8)}}</span> / <span>0x{{normalize(this.u8length, 8)}}</span> | 
@@ -299,11 +298,11 @@
     		fgcolor: '#000000', 
     		type: 'static',
     		sizetype: 0, 
-    		sizeint: 0, 
+    		sizeint: 'int8', 
     		size: 0, 
     		starttype: 0, 
     		start: 0, 
-    		startint: 0
+    		startint: 'int8'
     	}, 
     	utfDecoder: new TextDecoder(), 
     	maxColumns: 800, 
@@ -526,6 +525,15 @@
     	flipCfg(id) {
     		this.cfg[id] = !this.cfg[id]
     	}, 
+    	uploadAreas() {
+    		let el = document.createElement('input')
+    		el.type = 'file'
+    		el.addEventListener('change', async (e) => {
+    			this.areas = JSON.parse(await el.files[0].text())
+    			delete el
+    		})
+    		el.click()
+    	}
     }
     })
     
@@ -536,7 +544,7 @@
     		}
     		if (app.areas.length == 0) {
     			this._start = this.starttype == 0 ? 0 : parseInt(this.start, 16)
-    			this._size = this.sizetype == 0 ? parseInt(this.size) : app.readValue(this.size, this.sizetype)
+    			this._size = this.sizetype == 0 ? parseInt(this.size) : app.readValue(this.size, this.sizeint)
     		} else {
     			if (this.starttype == 0) { //after prev
 					let prevItem = app.areas[app.areas.length - 1]
@@ -544,13 +552,13 @@
 				} else if (this.starttype == 1) { //fixed pos
 					this._start = parseInt(this.start, 16)
 				} else { //from addr
-					this._start = app.readValue(this.start, this.starttype)
+					this._start = app.readValue(this.start, this.startint)
 				}
 				
 				if (this.sizetype == 0) { //fixed size
 					this._size = parseInt(this.size)
 				} else {
-					this._size = app.readValue(this.size, this.sizetype)
+					this._size = app.readValue(this.size, this.sizeint)
 				}
     		}
     	}

@@ -47,10 +47,40 @@
 			flex-direction: column;
 		}
 		.newItem input, .newItem select {
-			width: 180px;
 			display: flex;
 			margin: 10px;
 			justify-content: center;
+		}
+		input {
+			margin: 2px 0 20px 30px !important;
+			width: 150px !important;
+			border: none;
+			background: #fff;
+		}
+		button, input[type="button"] {
+			background: #fff;
+			border: 1px solid #555;
+			border-radius: 2px;
+			padding: 2px 4px;
+			margin: 0;
+			color: #555;
+			width: auto
+		}
+		select {
+			margin: 2px 0 20px 30px !important;
+			border: none;
+			color: #999;
+			width: 150px !important;
+		}
+		input[type="color"] {
+			padding: 0;
+		}
+		input[type="text"] {
+			color: #999;
+			border-bottom: 1px solid #999;
+		}
+		.save {
+			float: right;
 		}
 		.fmview {
 			position: fixed;

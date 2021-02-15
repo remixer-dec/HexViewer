@@ -8,6 +8,7 @@
 		body {
 			display: block;
 			font-family: monospace;
+			font-size: 13px;
 			margin: 0;
 			padding: 0;
 		}
@@ -20,6 +21,20 @@
 			margin: 0 20px;	
 			position: relative
 		}
+		.hexview {
+			min-width: 336px;
+			min-height: 780px;
+		}
+		.hexview.with-addr {
+			min-width: 410px;
+		}
+		.textview, .hexview {
+			line-height: 15.4px;
+			white-space: nowrap;
+		}
+		.textview {
+			min-width: 230px;
+		}
 		.structureview {
 			display: flex;
 			flex-direction: column;
@@ -31,7 +46,7 @@
 			justify-content: center;
 		}
 		.save {
-			position: fixed;
+			position: absolute;
 			right: 10px;
 			bottom: 10px;
 		}
@@ -42,6 +57,7 @@
 			left: 20px;
 			top: 0;
 			background: white;
+			z-index: 2;
 		}
 		.fmview div {
 			display: inline-block;
@@ -66,6 +82,9 @@
 			font-size: 10px;
 			vertical-align: top;
 			padding: 4px;
+		}
+		span.close:hover {
+			color: #782222;
 		}
 		.intro {
 			display: flex;
@@ -114,6 +133,52 @@
 			user-select: none;
 			cursor: pointer
 		}
+		.bottomview {
+			position: fixed;
+			bottom: 2px;
+			left: 20px;
+			width: 100%;
+			border-top: 1px solid #eee;
+			padding: 2px;
+			background: #fff;
+			z-index: 2;
+		}
+		.addr-bar {
+			color: #999;
+			user-select: none;
+		}
+		.addr-bar:hover {
+			user-select: text;
+		}
+		#hex-offset:hover {
+			cursor: pointer;
+			color: #999;
+		}
+		#hex-offset:hover:before {
+			content: 'double-click to go to a specific address';
+			position: absolute;
+			top: -14px;
+			font-size: 10px;
+		}
+		span.active:before {
+			content: '[';
+		}
+		span.active:after {
+			content: ']';
+		}
+		.cfg {
+			cursor: pointer;
+			user-select: none;
+		}
+		span.vdiv:before {
+			content: '';
+			display: inline-block;
+			position: absolute;
+			width: 2px;
+			background: #ddd;
+			height: 16px;
+			transform: translateX(-4px);
+		}
 	</style>
 </head>
 <body>
@@ -130,16 +195,18 @@
 			</div>
 			<label for="fileSelector"><div><span>+</span></div></label>
 		</div>
-		<div class="hexview">
-			<span class="arrow arrow-up" @mousedown="moveUp" @mouseup="stopMoving">&lt;</span>
+		<div class="hexview" :class="{'with-addr': cfg.showAddr}">
+			<span class="arrow arrow-up" @mousedown="moveUpArrow" @mouseup="stopMoving">&lt;</span>
 			<span class="scrollbar-wrapper" id="scwrapper"><span id="scrollbar" :style="{height: scrollbarHeight, transform: `translateY(${scroll.pos}px)`}" @mousedown="scrollPicked"></span></span>
-			<span class="arrow arrow-down" @mousedown="moveDown" @mouseup="stopMoving">&lt;</span>
-			<span v-for="(b, index) in u8short" :key="index" class="bytes" :style="getAreaColors(offset + index)"><br v-if="index%16 == 0 && index != 0">{{normalize(b)}}
-			<span class="row" v-if="index%4 == 0"></span></span>
+			<span class="arrow arrow-down" @mousedown="moveDownArrow" @mouseup="stopMoving">&lt;</span>
+			<span v-for="(b, index) in u8short" :key="index" class="bytes" :style="getAreaColors(offset + index)">
+				<br v-if="index%16 == 0 && index != 0">
+				<span v-if="cfg.showAddr && index%16 == 0" class="addr-bar">0x{{normalize(index + offset, 8)}} </span>
+				<span class="vdiv" v-if="cfg.vdiv && index%4 == 0 && index%16 != 0"></span>{{normalize(b)}}
+			</span>
 		</div>
 		<div class="textview">
-			<span v-for="(b, index) in u8short" :key="index" class="text"><br v-if="index%16 == 0 && index != 0">{{String.fromCharCode(b)}}
-			<span class="row" v-if="index%4 == 0"></span></span>
+			<span v-for="(b, index) in u8short" :key="index" class="text"><br v-if="index%16 == 0 && index != 0">{{String.fromCharCode(b)}} </span>
 		</div>
 		<div class="structureview">
 			<div class="newItem">
@@ -197,6 +264,12 @@
 			</div>
 			<button class="save" @click="downloadAreas()">Save schema</button>
 		</div>
+		<div class="bottomview">
+			<span @dblclick="goToAddress()" id="hex-offset">0x{{normalize(offset, 8)}}</span> / <span>0x{{normalize(this.u8length, 8)}}</span> | 
+			<span class="cfg" :class="{active: cfg.showAddr}" @click="flipCfg('showAddr')">Show address</span>
+			<span class="cfg" :class="{active: cfg.vdiv}" @click="flipCfg('vdiv')">Show vert. dividers</span>
+			<span class="cfg" :class="{active: cfg.sharedOffsets}" @click="flipCfg('sharedOffsets')">Shared scroll offset</span>
+		</div>
 	</div>
 </div>
 	<script>
@@ -234,14 +307,25 @@
     		pos: 0, 
     		min: 0, 
     		max: 0,
+    	}, 
+    	cfg: {
+    		sharedOffsets: true, 
+    		showAddr: true, 
+    		vdiv: true
     	}
     }, 
+     created() {
+     	window.addEventListener('wheel', this.mouseScrolled, true);
+     }, 
      mounted() {
      	this.defaultItem = Object.assign({}, this.newItem)
      }, 
     'computed': {
     	u8short() {
     		return this.u8.slice(this.offset, this.offset + this.maxColumns)
+    	}, 
+    	u8length() {
+    		return this.u8.length
     	}, 
     	areaMap() {
     		let m = []
@@ -251,7 +335,7 @@
     		return m
     	}, 
     	scrollbarHeight() {
-    		let val = this.maxColumns / this.u8.length * 100
+    		let val = this.maxColumns / this.u8length * 100
     		val = val < 1 ? 1 : val
     		val = val > 100 ? 100 : val
     		return val + "%"
@@ -284,18 +368,29 @@
     	}, 
     	loadFile(reader) {
     		let f = fileSelector.files[0]
+    		if (this.file) {
+    			this.files.find(x => x.name = this.selectedFile).offset = this.offset
+    		}
     		this.file = reader.result
     		this.offset = 0
     		this.u8 = new Uint8Array(this.file)
-    		this.files.push({name: f.name, size: f.size, u8: this.u8, file: this.file})
+    		this.files.push({name: f.name, size: f.size, u8: this.u8, file: this.file, offset: 0})
     		this.selectedFile = f.name
+    		this.$nextTick(() => this.setScrollbarToOffset())
     	}, 
     	selectFileFromTabs(name) {
+    		let currentFile = this.files.find(x => x.name == this.selectedFile)
     		let target = this.files.find(x => x.name == name)
     		this.file = target.file
     		this.u8 = target.u8
+    		if (this.cfg.sharedOffsets) {
+    			this.offset = this.offset + this.maxColumns < this.u8length ? this.offset : 0
+    		} else {
+    			currentFile.offset = this.offset
+    			this.offset = target.offset
+    		}
     		this.selectedFile = target.name
-    		this.offset = this.offset + this.maxColumns < this.u8.length ? this.offset : 0
+    		this.$nextTick(() => this.setScrollbarToOffset())
     	}, 
     	closeFile(name) {
     		if (this.files.length > 1) {
@@ -305,6 +400,16 @@
     		} else {
     			this.files = []
     			this.file = false
+    		}
+    	}, 
+    	goToAddress(){
+    		let addr = prompt("Go to Address", "0x"+this.normalize(this.offset, 8))
+    		let target = parseInt(addr, 16)
+    		if (target && target < this.u8length) {
+    			let td = target % 16
+    			this.offset = target - td
+    		} else {
+    			alert("Input error")
     		}
     	}, 
     	getAreaColors(index) {
@@ -324,26 +429,29 @@
     		Downloader.downloadBlob(JSON.stringify(this.areas), 'areas.json')
     	},
     	getU8LengthMinusLastScreen() {
-    		return (this.u8.length - (800 * (this.u8.length > 800)))
+    		return (this.u8length - (800 * (this.u8length > 800)))
+    	}, 
+    	moveUpArrow() {
+    		this.stopMoving()
+			this.moving = setInterval(this.moveUp, 64)
     	}, 
     	moveUp() {
+			this.offset = this.offset > 16? this.offset - 16 : 0
+			this.setScrollbarToOffset()
+    	}, 
+    	moveDownArrow() {
     		this.stopMoving()
-			this.moving = setInterval(() => {
-				this.offset = this.offset > 16? this.offset - 16 : 0
-				let percent = this.offset / this.getU8LengthMinusLastScreen() * 100
-				this.scroll.pos = ((this.scrollWrapperHeight - scrollbar.offsetHeight) * percent / 100)
-			}, 64)
+    		this.moving = setInterval(this.moveDown, 64)
     	}, 
     	moveDown() {
-    		this.stopMoving()
-    		this.moving = setInterval(() => {
-    			let fl = this.getU8LengthMinusLastScreen()
-    			this.offset =  this.offset < fl ? this.offset + 16 : this.offset
-    			let percent = this.offset / fl * 100
-				this.scroll.pos = ((this.scrollWrapperHeight - scrollbar.offsetHeight) * percent / 100)
-				console.log(this.offset, fl)
-				if (this.offset >= fl) clearInterval(this.moving)
-    		}, 64)
+    		let fl = this.getU8LengthMinusLastScreen() - (this.u8length * (this.u8length <= 800))
+    		this.offset =  this.offset < fl ? this.offset + 16 : this.offset
+    		this.setScrollbarToOffset()
+			if (this.offset >= fl) clearInterval(this.moving)
+    	}, 
+    	setScrollbarToOffset() {
+    		let percent = this.offset / this.getU8LengthMinusLastScreen() * 100
+			this.scroll.pos = (this.scrollWrapperHeight - scrollbar.offsetHeight) * percent / 100
     	}, 
     	stopMoving() {
     		clearInterval(this.moving)
@@ -366,11 +474,25 @@
     	scrollDroped() {
     		window.onmousemove = false
     		window.onmouseup = false
-    		let off = parseInt(this.scroll.pos / (this.scrollWrapperHeight-scrollbar.offsetHeight) * 100)
+    		let off = this.scroll.pos / (this.scrollWrapperHeight-scrollbar.offsetHeight) * 100
     		off = parseInt(this.getU8LengthMinusLastScreen() * off / 100)
     		off = off - (off % 16)
     		off = off > this.getU8LengthMinusLastScreen() ? this.getU8LengthMinusLastScreen() : off
     		this.offset = off
+    	}, 
+    	mouseScrolled(e) {
+    		if (e.deltaY < 0) {
+    			for (let i=0; i>e.deltaY; i-=150) {
+    				this.moveUp()
+    			}
+    		} else {
+    			for (let i=0; i<e.deltaY; i+=150) {
+					this.moveDown()
+				}
+    		}
+    	}, 
+    	flipCfg(id) {
+    		this.cfg[id] = !this.cfg[id]
     	}
     }
     })

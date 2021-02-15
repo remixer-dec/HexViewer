@@ -86,14 +86,33 @@
 			left: -14px;
 			font-size: 16px;
 			cursor: pointer;
+			user-select: none;
 		}
 		.arrow.arrow-up {
 			transform: rotate(90deg);
 			top: 0;
 		}
-		span.arrow.arrow-down {
+		.arrow.arrow-down {
 			bottom: 0;
 			transform: rotate(-90deg);
+			left: -15.6px;
+		}
+		span.scrollbar-wrapper {
+			position: absolute;
+			left: -14px;
+			top: 14px;
+			height: 100%;
+			width: 10px;
+			box-sizing: border-box;
+			display: block;
+			padding-bottom: 30px;
+		}
+		#scrollbar {
+			width: 8px;
+			display: block;
+			background: #777;
+			user-select: none;
+			cursor: pointer
 		}
 	</style>
 </head>
@@ -112,9 +131,10 @@
 			<label for="fileSelector"><div><span>+</span></div></label>
 		</div>
 		<div class="hexview">
-			<span class="arrow arrow-up">&lt;</span>
-			<span class="arrow arrow-down">&lt;</span>
-			<span v-for="(b, index) in u8short" :key="index" class="bytes" :style="getAreaColors(index)"><br v-if="index%16 == 0 && index != 0">{{normalize(b)}}
+			<span class="arrow arrow-up" @mousedown="moveUp" @mouseup="stopMoving">&lt;</span>
+			<span class="scrollbar-wrapper" id="scwrapper"><span id="scrollbar" :style="{height: scrollbarHeight, transform: `translateY(${scroll.pos}px)`}" @mousedown="scrollPicked"></span></span>
+			<span class="arrow arrow-down" @mousedown="moveDown" @mouseup="stopMoving">&lt;</span>
+			<span v-for="(b, index) in u8short" :key="index" class="bytes" :style="getAreaColors(offset + index)"><br v-if="index%16 == 0 && index != 0">{{normalize(b)}}
 			<span class="row" v-if="index%4 == 0"></span></span>
 		</div>
 		<div class="textview">
@@ -180,7 +200,7 @@
 	</div>
 </div>
 	<script>
-	var app = new Vue({
+	const app = new Vue({
     'el': '#app',
     'data': {
     	file: false, 
@@ -201,16 +221,27 @@
     		start: 0, 
     		startint: 0
     	}, 
+    	maxColumns: 800, 
     	selectedFile: false, 
     	defaultColors: {backgroundColor: '#ffffff', color: '#000000'}, 
-    	defaultItem: false
+    	defaultItem: false, 
+    	moving: false, 
+    	offset: 0, 
+    	scroll: {
+    		wrapperHeight: this.scrollWrapperHeight, 
+    		start: 0, 
+    		startPos: 0, 
+    		pos: 0, 
+    		min: 0, 
+    		max: 0,
+    	}
     }, 
      mounted() {
      	this.defaultItem = Object.assign({}, this.newItem)
      }, 
     'computed': {
     	u8short() {
-    		return this.u8.slice(0, 800)
+    		return this.u8.slice(this.offset, this.offset + this.maxColumns)
     	}, 
     	areaMap() {
     		let m = []
@@ -218,6 +249,15 @@
     			m.push([area._start, area._start + area._size, area.bgcolor, area.fgcolor])
     		}
     		return m
+    	}, 
+    	scrollbarHeight() {
+    		let val = this.maxColumns / this.u8.length * 100
+    		val = val < 1 ? 1 : val
+    		val = val > 100 ? 100 : val
+    		return val + "%"
+    	}, 
+    	scrollWrapperHeight() {
+    		return scwrapper.offsetHeight - 36
     	}
     }, 
     'methods': {
@@ -245,6 +285,7 @@
     	loadFile(reader) {
     		let f = fileSelector.files[0]
     		this.file = reader.result
+    		this.offset = 0
     		this.u8 = new Uint8Array(this.file)
     		this.files.push({name: f.name, size: f.size, u8: this.u8, file: this.file})
     		this.selectedFile = f.name
@@ -254,9 +295,9 @@
     		this.file = target.file
     		this.u8 = target.u8
     		this.selectedFile = target.name
+    		this.offset = this.offset + this.maxColumns < this.u8.length ? this.offset : 0
     	}, 
     	closeFile(name) {
-    		console.log('closing ', name)
     		if (this.files.length > 1) {
     			let index = this.files.findIndex(x => x.name == name)
     			this.files.splice(index, 1)
@@ -281,6 +322,55 @@
     	}, 
     	downloadAreas() {
     		Downloader.downloadBlob(JSON.stringify(this.areas), 'areas.json')
+    	},
+    	getU8LengthMinusLastScreen() {
+    		return (this.u8.length - (800 * (this.u8.length > 800)))
+    	}, 
+    	moveUp() {
+    		this.stopMoving()
+			this.moving = setInterval(() => {
+				this.offset = this.offset > 16? this.offset - 16 : 0
+				let percent = this.offset / this.getU8LengthMinusLastScreen() * 100
+				this.scroll.pos = ((this.scrollWrapperHeight - scrollbar.offsetHeight) * percent / 100)
+			}, 64)
+    	}, 
+    	moveDown() {
+    		this.stopMoving()
+    		this.moving = setInterval(() => {
+    			let fl = this.getU8LengthMinusLastScreen()
+    			this.offset =  this.offset < fl ? this.offset + 16 : this.offset
+    			let percent = this.offset / fl * 100
+				this.scroll.pos = ((this.scrollWrapperHeight - scrollbar.offsetHeight) * percent / 100)
+				console.log(this.offset, fl)
+				if (this.offset >= fl) clearInterval(this.moving)
+    		}, 64)
+    	}, 
+    	stopMoving() {
+    		clearInterval(this.moving)
+    	},
+    	scrollPicked(e) {
+    		this.scroll.start = e.clientY
+    		this.scroll.startPos = this.scroll.pos
+    		this.scroll.min = 0
+    		this.scroll.max = this.scrollWrapperHeight - scrollbar.offsetHeight
+    		window.onmousemove = this.scrollMoved
+    		window.onmouseup = this.scrollDroped
+    	}, 
+    	scrollMoved(e) {
+    		let diff = e.clientY - this.scroll.start
+    		let min = this.scroll.min - this.scroll.startPos
+    		let max = this.scroll.max - this.scroll.startPos
+    		diff = diff < min ? min : (diff > max? max : diff)
+    		this.scroll.pos = this.scroll.startPos + diff
+    	}, 
+    	scrollDroped() {
+    		window.onmousemove = false
+    		window.onmouseup = false
+    		let off = parseInt(this.scroll.pos / (this.scrollWrapperHeight-scrollbar.offsetHeight) * 100)
+    		off = parseInt(this.getU8LengthMinusLastScreen() * off / 100)
+    		off = off - (off % 16)
+    		off = off > this.getU8LengthMinusLastScreen() ? this.getU8LengthMinusLastScreen() : off
+    		this.offset = off
     	}
     }
     })

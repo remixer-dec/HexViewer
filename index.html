@@ -45,6 +45,11 @@
 			margin: 10px;
 			justify-content: center;
 		}
+		.load {
+			position: absolute;
+			right: 10px;
+			bottom: 40px;
+		}
 		.save {
 			position: absolute;
 			right: 10px;
@@ -206,7 +211,11 @@
 			</span>
 		</div>
 		<div class="textview">
-			<span v-for="(b, index) in u8short" :key="index" class="text"><br v-if="index%16 == 0 && index != 0">{{String.fromCharCode(b)}} </span>
+			<span v-if="!cfg.utfText" v-for="(b, index) in u8short" :key="index" class="text"><br v-if="index%16 == 0 && index != 0">{{String.fromCharCode(b)}} </span>
+			<span v-if="cfg.utfText" v-for="(b, index) in u8short" :key="index" class="text">
+				<span v-if="index%2 == 0"> {{u8shortDecoded[index/2]}} </span>
+				<br v-if="index%16 == 0 && index != 0">
+			</span>
 		</div>
 		<div class="structureview">
 			<div class="newItem">
@@ -256,12 +265,13 @@
 				<tr v-for="(area, index) in areas" :key="index">
 					<td>{{index}}</td>
 					<td :style="{backgroundColor: area.bgcolor, color: area.fgcolor}">{{area.name}}</td>
-					<td>0x{{normalize(area._start, 6)}}</td>
+					<td>0x{{normalize(area._start, 8)}}</td>
 					<td>{{area._size}}</td>
 					<td @click=deleteArea(area.id)><button>delete</button></td>
 				</tr>
 				</table>
 			</div>
+			<button class="load" @click="uploadAreas()">Load schema</button>
 			<button class="save" @click="downloadAreas()">Save schema</button>
 		</div>
 		<div class="bottomview">
@@ -269,6 +279,7 @@
 			<span class="cfg" :class="{active: cfg.showAddr}" @click="flipCfg('showAddr')">Show address</span>
 			<span class="cfg" :class="{active: cfg.vdiv}" @click="flipCfg('vdiv')">Show vert. dividers</span>
 			<span class="cfg" :class="{active: cfg.sharedOffsets}" @click="flipCfg('sharedOffsets')">Shared scroll offset</span>
+			<span class="cfg" :class="{active: cfg.utfText}" @click="flipCfg('utfText')">Text as UTF-8</span>
 		</div>
 	</div>
 </div>
@@ -280,7 +291,7 @@
     	u8: false,
     	files: [], 
     	areas: [],
-    	inttypes: ["i08", "i16", "i24", "i32", "i64", "u08", "u16", "u24", "u32", "u64"], 
+    	inttypes: ["int8", "int16LE", "int16BE", "int32LE", "int32BE", "uint8", "uint16LE", "uint16BE", "uint32LE", "uint32BE"], 
     	newItem: {
     		id: 0, 
     		name: '', 
@@ -294,6 +305,7 @@
     		start: 0, 
     		startint: 0
     	}, 
+    	utfDecoder: new TextDecoder(), 
     	maxColumns: 800, 
     	selectedFile: false, 
     	defaultColors: {backgroundColor: '#ffffff', color: '#000000'}, 
@@ -311,7 +323,8 @@
     	cfg: {
     		sharedOffsets: true, 
     		showAddr: true, 
-    		vdiv: true
+    		vdiv: true, 
+    		utfText: false
     	}
     }, 
      created() {
@@ -326,6 +339,13 @@
     	}, 
     	u8length() {
     		return this.u8.length
+    	}, 
+    	u8shortDecoded() {
+    		if (this.cfg.utfText) {
+    			return this.utfDecoder.decode(this.u8short)
+    		} else {
+    			return new Array(800)
+    		}
     	}, 
     	areaMap() {
     		let m = []
@@ -421,9 +441,21 @@
     		}
     		return this.defaultColors
     	},
-    	readValue(offset, inttype=false) {
-    		//TODO: implement inttype specific reading
-    		return this.u8[offset]
+    	readValue(offset, inttype="uint8") {
+    		let off = parseInt(offset, 16)
+    		let handlers = {
+    			"uint8": () => this.u8[off], 
+    			"int8": () => new DataView(this.u8.slice(off, off+1).buffer).getInt8(), 
+    			"uint16BE": () => new DataView(this.u8.slice(off, off+2).buffer).getUint16(), 
+    			"int16BE": () => new DataView(this.u8.slice(off, off+2).buffer).getInt16(), 
+    			"uint32BE": () => new DataView(this.u8.slice(off, off+4).buffer).getUint32(), 
+    			"int32BE": () => new DataView(this.u8.slice(off, off+4).buffer).getInt32(),  
+    			"uint16LE": () => new DataView(this.u8.slice(off, off+2).buffer).getUint16(0, true), 
+    			"int16LE": () => new DataView(this.u8.slice(off, off+2).buffer).getInt16(0, true), 
+    			"uint32LE": () => new DataView(this.u8.slice(off, off+4).buffer).getUint32(0, true), 
+    			"int32LE": () => new DataView(this.u8.slice(off, off+4).buffer).getInt32(0, true)
+    		}
+    		return handlers[inttype]()
     	}, 
     	downloadAreas() {
     		Downloader.downloadBlob(JSON.stringify(this.areas), 'areas.json')
@@ -493,7 +525,7 @@
     	}, 
     	flipCfg(id) {
     		this.cfg[id] = !this.cfg[id]
-    	}
+    	}, 
     }
     })
     
@@ -504,21 +536,21 @@
     		}
     		if (app.areas.length == 0) {
     			this._start = this.starttype == 0 ? 0 : parseInt(this.start, 16)
-    			this._size = this.sizetype == 0 ? parseInt(this.size) : parseInt(this.size) /*TODO: implement reading start size*/
+    			this._size = this.sizetype == 0 ? parseInt(this.size) : app.readValue(this.size, this.sizetype)
     		} else {
     			if (this.starttype == 0) { //after prev
-					let prevItem = app.areas.find(a => a.id == app.defaultItem.id-1)
+					let prevItem = app.areas[app.areas.length - 1]
 					this._start = prevItem._start + prevItem._size
 				} else if (this.starttype == 1) { //fixed pos
 					this._start = parseInt(this.start, 16)
 				} else { //from addr
-					this._start = app.readValue(this.start)
+					this._start = app.readValue(this.start, this.starttype)
 				}
 				
 				if (this.sizetype == 0) { //fixed size
 					this._size = parseInt(this.size)
 				} else {
-					this._size = app.readValue(this.size)
+					this._size = app.readValue(this.size, this.sizetype)
 				}
     		}
     	}
